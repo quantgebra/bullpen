@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "bullpen-client"
+version = "0.1.0"
+description = "Typed httpx client for bullpen-server"
+authors = ["Maciej Zawadzki <maciej.zawadzki@gmail.com>"]
+readme = "README.md"
+packages = [{ include = "bullpen_client", from = "src" }]
+
+[tool.pytest.ini_options]
+pythonpath = "src"
+testpaths = ["tests"]
+
+[tool.black]
+line-length = 120
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.15"
+bullpen-common = { path = "../bullpen-common", develop = true }
+httpx = "^0.28"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.1.1"
+black = "^24.3.0"

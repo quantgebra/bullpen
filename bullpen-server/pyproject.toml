@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "bullpen-server"
+version = "0.1.0"
+description = "REST API and Postgres command-queue worker"
+authors = ["Maciej Zawadzki <maciej.zawadzki@gmail.com>"]
+readme = "README.md"
+packages = [{ include = "bullpen_server", from = "src" }]
+
+[tool.pytest.ini_options]
+pythonpath = "src"
+testpaths = ["tests"]
+
+[tool.black]
+line-length = 120
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.15"
+bullpen-common = { path = "../bullpen-common", develop = true }
+bullpen-sec-master = { path = "../bullpen-sec-master", develop = true }
+bullpen-ibor = { path = "../bullpen-ibor", develop = true }
+fastapi = "^0.115"
+uvicorn = "^0.34"
+pydantic-settings = "^2.12"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.1.1"
+black = "^24.3.0"
+httpx = "^0.28"

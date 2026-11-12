@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "bullpen-sec-master"
+version = "0.1.0"
+description = "Bi-temporal securities master"
+authors = ["Maciej Zawadzki <maciej.zawadzki@gmail.com>"]
+readme = "README.md"
+packages = [{ include = "bullpen_sec_master", from = "src" }]
+
+[tool.pytest.ini_options]
+pythonpath = "src"
+testpaths = ["tests"]
+
+[tool.black]
+line-length = 120
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.15"
+bullpen-common = {path = "../bullpen-common", develop = true}
+sqlalchemy = "^2.0.45"
+psycopg = { version = "^3.2", extras = ["binary"] }
+alembic = "^1.17"
+pydantic = "^2.12"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.1.1"
+black = "^24.3.0"
+testcontainers = { version = "^4.13", extras = ["postgres"] }

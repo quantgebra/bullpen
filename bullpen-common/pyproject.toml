@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "bullpen-common"
+version = "0.1.0"
+description = "Wire DTOs, enums and shared types"
+authors = ["Maciej Zawadzki <maciej.zawadzki@gmail.com>"]
+readme = "README.md"
+packages = [{ include = "bullpen_common", from = "src" }]
+
+[tool.pytest.ini_options]
+pythonpath = "src"
+testpaths = ["tests"]
+
+[tool.black]
+line-length = 120
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.15"
+pydantic = "^2.12"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.1.1"
+black = "^24.3.0"
