@@ -69,15 +69,20 @@ client ──POST /commands──► bullpen-server ──INSERT──► cmd.co
 ## 4. Gen 3 IBOR
 
 Implemented in the `bullpen_ibor` package (Postgres schema `ibor`); the guide tests in `bullpen-ibor/tests` are the
-executable spec. Slice 1 (booking trades, positions, roll-ups) is done.
+executable spec. Slices 1 (booking trades, positions, roll-ups) and 2 (corrections, execution time) are done.
 
 - **Books.** A book is the `(fund_id, mandate_id, account_id)` triple of fund-master ids, stored as it is on every
   trade and event: there is no `books` table and no book id. `(fund_id, mandate_id)` is a sleeve. The IBOR has no
   foreign keys to the fund master; the command handler checks that the book fits before booking.
 - **One append-only table, `ibor.events`,** never updated or deleted. Each event is a signed `delta_quantity` of
   `traded_instrument_id`, held in the book for `portfolio_instrument_id` (usually a synthetic), with `trade_date`,
-  `settlement_date`, `known_at_datetime`, `event_type`, `command_id`, and `reverses_event_id` (unique: an event is
-  reversed at most once). Instrument ids are securities-master stable keys, referenced by id only.
+  `settlement_date`, `effective_datetime`, `known_at_datetime`, `event_type`, `command_id`, and `reverses_event_id`
+  (unique: an event is reversed at most once). Instrument ids are securities-master stable keys, referenced by id only.
+- **Four times, four questions.** `trade_date` is the session the change belongs to: the effective date of the traded
+  view (it plays the role of the sec-master's `effective_from_date`, with no upper bound because events are offset,
+  never re-dated). `settlement_date` is the settled view's effective date. `effective_datetime` is the instant it
+  happened (a trade's execution time), which orders events within a day for intraday views and lot relief; for an
+  evening Globex trade it falls on the calendar day before `trade_date`. `known_at_datetime` is when we learned it.
 - **Knowledge is an instant, not a range.** A sec-master correction replaces a belief; a ledger correction is a
   compensating event that offsets the mistake. Positions stay `SUM(delta_quantity)` over events with
   `known_at_datetime <= K`, and every restatement is visible as events.
@@ -86,9 +91,16 @@ executable spec. Slice 1 (booking trades, positions, roll-ups) is done.
   `command_id` says which command wrote it; the source says why. Pointing at the version gives exact lineage and makes
   "events whose source has since been amended" a query. There is no FK (sources live in several tables and schemas);
   the command handler is the only writer.
-- **Trades** (`ibor.trades`) are recorded as received from the OMS or broker and versioned like corporate actions:
-  stable `trade_id`, one row per version with a `knowledge_range`. `Trade.book_trade(...)` records the trade and
-  appends its events. `cash_amount` is the broker's signed settlement amount, so booking cash needs no multiplier or
+- **Trades** (`ibor.trades`) are allocated trades (the per-account block at its average price, with
+  `executed_at_datetime` of its last fill); fills stay in the OMS. They are recorded as received and versioned like
+  corporate actions: stable `trade_id`, one row per version with a `knowledge_range`. `Trade.book_trade(...)` records
+  the trade and appends its events.
+- **Corrections.** `trade.with_new_terms(...)` (an amendment) and `trade.cancel(...)` (a bust) stop believing the
+  version and reverse each of its events (`Event.build_reversal`: opposite quantity, same dates and source,
+  `reverses_event_id` set, learned at the correction time); an amendment's new version books its own events. Positions
+  restate from the correction on; a run made before it gets the same answer it got then.
+  `Event.find_learned_between(...)` lists what changed between two runs. Moving a trade to another book is a cancel and
+  a new trade. `cash_amount` is the broker's signed settlement amount, so booking cash needs no multiplier or
   quote convention; a futures trade has zero cash and books only the quantity event.
 - **Cash is an instrument quantity** (`InstrumentType.CASH`), held with itself as the portfolio security, so a buy is
   +shares and -dollars in one sum.
@@ -101,8 +113,8 @@ executable spec. Slice 1 (booking trades, positions, roll-ups) is done.
 - Snapshots are optional caches and may be discarded or rebuilt at any time. Day close is a knowledge-time marker, not
   a gate: late trades land normally and surface as restatements.
 
-Next slices: corrections (amend and cancel trades via reversals), synthetic lineage against research weights, cash
-(fees, transfers, cash ladder), corporate-action application, lots and realized P&L.
+Next slices: synthetic lineage against research weights, cash (fees, transfers, cash ladder), corporate-action
+application, lots and realized P&L (FIFO by `effective_datetime`), intraday positions.
 
 ## 4a. Fund master
 

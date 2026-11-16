@@ -17,13 +17,16 @@ TRADE_ID_SEQ: sqlalchemy.Sequence = sqlalchemy.Sequence("trade_id_seq", metadata
 # ======================================================================================================================
 class Trade(base.Base):
     """
-    A trade as received from the OMS or a broker, and the source of the events it causes. Trades are amended and
-    cancelled after the fact, so they are versioned like corporate actions: trade_id is the stable key, each row is one
-    version believed during knowledge_range, and events point at the row (the version) they were computed from.
+    An allocated trade as received from the OMS or a broker (the per-account block at its average price; fills stay in
+    the OMS), and the source of the events it causes. Trades are amended and cancelled after the fact, so they are
+    versioned like corporate actions: trade_id is the stable key, each row is one version believed during
+    knowledge_range, and events point at the row (the version) they were computed from. Superseding a version reverses
+    its events; the new version books its own.
 
     quantity is signed (positive buys). cash_amount is the signed settlement amount in cash_instrument_id as the broker
     states it (negative for a buy), so the IBOR never needs a multiplier or a quote convention to book cash. For a
-    futures trade it is zero and no cash event is booked.
+    futures trade it is zero and no cash event is booked. executed_at_datetime is when the block was executed (its last
+    fill); trade_date is the session it belongs to, which for an evening Globex trade is the next calendar day.
     """
 
     # ==================================================================================================================
@@ -55,6 +58,7 @@ class Trade(base.Base):
         price: Decimal,
         cash_instrument_id: int,
         cash_amount: Decimal,
+        executed_at_datetime: datetime,
         trade_date: date,
         settlement_date: date,
         external_ref: Optional[str] = None,
@@ -63,7 +67,6 @@ class Trade(base.Base):
         Record a new trade in the book (fund_id, mandate_id, account_id) and append its events: the traded quantity
         and, unless it is zero, the cash. The caller has checked the book against the fund master.
         """
-        # record the trade first: its row_id is the source of the events
         trade_row: Trade = Trade(
             knowledge_range=postgresql.Range(known_at_datetime, None, bounds="[)"),
             fund_id=fund_id,
@@ -75,27 +78,12 @@ class Trade(base.Base):
             price=price,
             cash_instrument_id=cash_instrument_id,
             cash_amount=cash_amount,
+            executed_at_datetime=executed_at_datetime,
             trade_date=trade_date,
             settlement_date=settlement_date,
             external_ref=external_ref,
         )
-        session.add(trade_row)
-        session.flush()
-
-        # the traded quantity is attributed to the portfolio security
-        quantity_event: event_module.Event = trade_row._build_event(
-            event_types.EventType.TRADE_QUANTITY, portfolio_instrument_id, traded_instrument_id, quantity
-        )
-        session.add(quantity_event)
-
-        # cash is its own portfolio security: it is the mandate's cash, not part of the position that was traded
-        if cash_amount != 0:
-            cash_event: event_module.Event = trade_row._build_event(
-                event_types.EventType.TRADE_CASH, cash_instrument_id, cash_instrument_id, cash_amount
-            )
-            session.add(cash_event)
-        session.flush()
-
+        trade_row._add_with_events(session)
         return trade_row
 
     # ------------------------------------------------------------------------------------------------------------------
@@ -124,14 +112,59 @@ class Trade(base.Base):
     price: orm.Mapped[Decimal] = orm.mapped_column(sqlalchemy.Numeric(28, 10))
     cash_instrument_id: orm.Mapped[int]
     cash_amount: orm.Mapped[Decimal] = orm.mapped_column(sqlalchemy.Numeric(28, 10))
+    executed_at_datetime: orm.Mapped[datetime] = orm.mapped_column(sqlalchemy.DateTime(timezone=True))
     trade_date: orm.Mapped[date]
     settlement_date: orm.Mapped[date]
     external_ref: orm.Mapped[Optional[str]]
     command_id: orm.Mapped[Optional[int]]
 
     # ------------------------------------------------------------------------------------------------------------------
+    def with_new_terms(
+        self,
+        session: orm.Session,
+        known_at_datetime: datetime,
+        quantity: Decimal,
+        price: Decimal,
+        cash_amount: Decimal,
+        executed_at_datetime: datetime,
+        trade_date: date,
+        settlement_date: date,
+    ) -> "Trade":
+        """
+        The broker amended the trade: from known_at_datetime on, it has these economic terms. self's events are
+        reversed and the returned version books its own; the book and instruments stay (moving a trade to another book
+        is a cancel and a new trade).
+        """
+        self._supersede(session, known_at_datetime)
+
+        replacement_row: Trade = Trade(
+            trade_id=self.trade_id,
+            knowledge_range=postgresql.Range(known_at_datetime, None, bounds="[)"),
+            fund_id=self.fund_id,
+            mandate_id=self.mandate_id,
+            account_id=self.account_id,
+            portfolio_instrument_id=self.portfolio_instrument_id,
+            traded_instrument_id=self.traded_instrument_id,
+            quantity=quantity,
+            price=price,
+            cash_instrument_id=self.cash_instrument_id,
+            cash_amount=cash_amount,
+            executed_at_datetime=executed_at_datetime,
+            trade_date=trade_date,
+            settlement_date=settlement_date,
+            external_ref=self.external_ref,
+        )
+        replacement_row._add_with_events(session)
+        return replacement_row
+
+    # ------------------------------------------------------------------------------------------------------------------
+    def cancel(self, session: orm.Session, known_at_datetime: datetime) -> None:
+        """The trade was busted or booked in error: from known_at_datetime on it is not believed; its events net out."""
+        self._supersede(session, known_at_datetime)
+
+    # ------------------------------------------------------------------------------------------------------------------
     def get_events(self, session: orm.Session) -> list[event_module.Event]:
-        """The events this version of the trade caused, in the order they were appended."""
+        """The events this version of the trade caused, including their reversals, in the order they were appended."""
         select_statement: sqlalchemy.Select = (
             sqlalchemy.select(event_module.Event)
             .where(
@@ -142,6 +175,26 @@ class Trade(base.Base):
         )
         result: list[event_module.Event] = list(session.scalars(select_statement).all())
         return result
+
+    # ------------------------------------------------------------------------------------------------------------------
+    def _add_with_events(self, session: orm.Session) -> None:
+        """Insert this version, then its events, which need its row_id as their source."""
+        session.add(self)
+        session.flush()
+
+        # the traded quantity is attributed to the portfolio security
+        quantity_event: event_module.Event = self._build_event(
+            event_types.EventType.TRADE_QUANTITY, self.portfolio_instrument_id, self.traded_instrument_id, self.quantity
+        )
+        session.add(quantity_event)
+
+        # cash is its own portfolio security: it is the mandate's cash, not part of the position that was traded
+        if self.cash_amount != 0:
+            cash_event: event_module.Event = self._build_event(
+                event_types.EventType.TRADE_CASH, self.cash_instrument_id, self.cash_instrument_id, self.cash_amount
+            )
+            session.add(cash_event)
+        session.flush()
 
     # ------------------------------------------------------------------------------------------------------------------
     def _build_event(
@@ -162,9 +215,26 @@ class Trade(base.Base):
             delta_quantity=delta_quantity,
             trade_date=self.trade_date,
             settlement_date=self.settlement_date,
+            effective_datetime=self.executed_at_datetime,
             known_at_datetime=self.knowledge_range.lower,
             source_type=source_types.SourceType.TRADE,
             source_row_id=self.row_id,
             command_id=self.command_id,
         )
         return result
+
+    # ------------------------------------------------------------------------------------------------------------------
+    def _supersede(self, session: orm.Session, known_at_datetime: datetime) -> None:
+        """Stop believing this version from known_at_datetime on, and reverse every event it caused."""
+        if self.knowledge_range.upper is not None:
+            raise ValueError(f"trade {self.trade_id} version {self.row_id} is no longer believed")
+        if known_at_datetime <= self.knowledge_range.lower:
+            raise ValueError(f"trade {self.trade_id} cannot change at or before it was learned")
+
+        # reverse first: get_events must see only this version's original events
+        for original_event in self.get_events(session):
+            reversal_event: event_module.Event = original_event.build_reversal(known_at_datetime, None)
+            session.add(reversal_event)
+
+        self.knowledge_range = postgresql.Range(self.knowledge_range.lower, known_at_datetime, bounds="[)")
+        session.flush()

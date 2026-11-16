@@ -31,20 +31,22 @@ import bullpen_ibor.position_view as position_views
 import bullpen_ibor.source_type as source_types
 import bullpen_ibor.trade as trade
 
-MAIN_FUND_ID: int = 1
-ALPHA_MANDATE_ID: int = 11
-BETA_MANDATE_ID: int = 12
-GS_ACCOUNT_ID: int = 21
-MS_ACCOUNT_ID: int = 22
-
-USD_CASH_INSTRUMENT_ID: int = 1
-APPLE_INSTRUMENT_ID: int = 101
-MICROSOFT_INSTRUMENT_ID: int = 102
-CLZ6_INSTRUMENT_ID: int = 201
-ALPHA_CL_SYNTHETIC_INSTRUMENT_ID: int = 501
+from .conftest import (
+    ALPHA_CL_SYNTHETIC_INSTRUMENT_ID,
+    ALPHA_MANDATE_ID,
+    APPLE_INSTRUMENT_ID,
+    BETA_MANDATE_ID,
+    CLZ6_INSTRUMENT_ID,
+    GS_ACCOUNT_ID,
+    MAIN_FUND_ID,
+    MICROSOFT_INSTRUMENT_ID,
+    MS_ACCOUNT_ID,
+    USD_CASH_INSTRUMENT_ID,
+)
 
 TRADE_DATE: date = date(2026, 11, 10)
 SETTLEMENT_DATE: date = date(2026, 11, 11)
+EXECUTED_DATETIME: datetime = datetime(2026, 11, 10, 14, 30, tzinfo=timezone.utc)
 BOOKED_DATETIME: datetime = datetime(2026, 11, 10, 15, 0, tzinfo=timezone.utc)
 NOW_DATETIME: datetime = datetime(2026, 11, 15, 12, 0, tzinfo=timezone.utc)
 TRADED: position_views.PositionView = position_views.PositionView.TRADED
@@ -67,6 +69,7 @@ def apple_buy_trade(session) -> trade.Trade:
         price=Decimal(250),
         cash_instrument_id=USD_CASH_INSTRUMENT_ID,
         cash_amount=Decimal(-25000),
+        executed_at_datetime=EXECUTED_DATETIME,
         trade_date=TRADE_DATE,
         settlement_date=SETTLEMENT_DATE,
         external_ref="GS-EXEC-0001",
@@ -153,6 +156,7 @@ def test_05_selling_everything_leaves_no_position(session, apple_buy_trade) -> N
         price=Decimal(260),
         cash_instrument_id=USD_CASH_INSTRUMENT_ID,
         cash_amount=Decimal(26000),
+        executed_at_datetime=datetime(2026, 11, 12, 14, 30, tzinfo=timezone.utc),
         trade_date=date(2026, 11, 12),
         settlement_date=date(2026, 11, 13),
     )
@@ -183,6 +187,7 @@ def test_06_a_late_trade_is_invisible_to_earlier_runs(session, apple_buy_trade) 
         price=Decimal(500),
         cash_instrument_id=USD_CASH_INSTRUMENT_ID,
         cash_amount=Decimal(-5000),
+        executed_at_datetime=EXECUTED_DATETIME,
         trade_date=TRADE_DATE,
         settlement_date=SETTLEMENT_DATE,
     )
@@ -216,6 +221,7 @@ def test_07_a_futures_trade_is_attributed_to_the_mandates_synthetic(session) -> 
         price=Decimal("71.38"),
         cash_instrument_id=USD_CASH_INSTRUMENT_ID,
         cash_amount=Decimal(0),
+        executed_at_datetime=EXECUTED_DATETIME,
         trade_date=TRADE_DATE,
         settlement_date=TRADE_DATE,
     )
@@ -251,6 +257,7 @@ def test_08_positions_roll_up_by_sleeve_by_account_and_by_fund(session) -> None:
             price=Decimal(250),
             cash_instrument_id=USD_CASH_INSTRUMENT_ID,
             cash_amount=Decimal(-250 * apple_quantity),
+            executed_at_datetime=EXECUTED_DATETIME,
             trade_date=TRADE_DATE,
             settlement_date=SETTLEMENT_DATE,
         )
@@ -289,6 +296,7 @@ def test_09_a_zero_quantity_trade_is_refused(session) -> None:
             price=Decimal(250),
             cash_instrument_id=USD_CASH_INSTRUMENT_ID,
             cash_amount=Decimal(0),
+            executed_at_datetime=EXECUTED_DATETIME,
             trade_date=TRADE_DATE,
             settlement_date=SETTLEMENT_DATE,
         )

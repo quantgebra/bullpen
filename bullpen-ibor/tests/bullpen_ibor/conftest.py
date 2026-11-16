@@ -7,6 +7,19 @@ from testcontainers.community import postgres
 
 import bullpen_ibor.schema as schema
 
+# fund-master ids (fund, mandates, accounts) and securities-master ids (instruments): the IBOR stores ids only
+MAIN_FUND_ID: int = 1
+ALPHA_MANDATE_ID: int = 11
+BETA_MANDATE_ID: int = 12
+GS_ACCOUNT_ID: int = 21
+MS_ACCOUNT_ID: int = 22
+
+USD_CASH_INSTRUMENT_ID: int = 1
+APPLE_INSTRUMENT_ID: int = 101
+MICROSOFT_INSTRUMENT_ID: int = 102
+CLZ6_INSTRUMENT_ID: int = 201
+ALPHA_CL_SYNTHETIC_INSTRUMENT_ID: int = 501
+
 
 # ----------------------------------------------------------------------------------------------------------------------
 @pytest.fixture(scope="session")
