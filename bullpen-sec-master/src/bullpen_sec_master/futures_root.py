@@ -10,6 +10,7 @@ import bullpen_sec_master.as_of as as_of_module
 import bullpen_sec_master.base as base
 import bullpen_sec_master.exchange as exchange_module
 import bullpen_sec_master.settlement_type as settlement_types
+import bullpen_sec_master.trading_calendar as trading_calendar_module
 
 FUTURES_ROOT_ID_SEQ: sqlalchemy.Sequence = sqlalchemy.Sequence("futures_root_id_seq", metadata=base.Base.metadata)
 
@@ -44,7 +45,9 @@ class FuturesRoot(base.Base):
         multiplier: Decimal,
         tick_size: Decimal,
         settlement_type: settlement_types.SettlementType,
+        trading_calendar: Optional[trading_calendar_module.TradingCalendar] = None,
     ) -> "FuturesRoot":
+        """A new root with a new futures_root_id; trading_calendar overrides the exchange's calendar when given."""
         created_row: FuturesRoot = FuturesRoot(
             effective_range=postgresql.Range(effective_from_date, None, bounds="[)"),
             knowledge_range=postgresql.Range(known_at_datetime, None, bounds="[)"),
@@ -54,6 +57,7 @@ class FuturesRoot(base.Base):
             multiplier=multiplier,
             tick_size=tick_size,
             settlement_type=settlement_type,
+            trading_calendar_id=trading_calendar.id if trading_calendar is not None else None,
         )
         session.add(created_row)
         session.flush()
@@ -133,7 +137,22 @@ class FuturesRoot(base.Base):
     settlement_type: orm.Mapped[settlement_types.SettlementType] = orm.mapped_column(
         sqlalchemy.Enum(settlement_types.SettlementType, name="settlement_type")
     )
+    trading_calendar_id: orm.Mapped[Optional[int]] = orm.mapped_column(
+        sqlalchemy.ForeignKey("sec_master.trading_calendars.id")
+    )
     command_id: orm.Mapped[Optional[int]]
+
+    # ------------------------------------------------------------------------------------------------------------------
+    def get_trading_calendar(self, session: orm.Session) -> Optional[trading_calendar_module.TradingCalendar]:
+        """The root's own trading calendar if it has one, otherwise its exchange's."""
+        if self.trading_calendar_id is not None:
+            result: Optional[trading_calendar_module.TradingCalendar] = session.get(
+                trading_calendar_module.TradingCalendar, self.trading_calendar_id
+            )
+        else:
+            root_exchange: exchange_module.Exchange = session.get(exchange_module.Exchange, self.exchange_id)
+            result = root_exchange.get_trading_calendar(session)
+        return result
 
     # ------------------------------------------------------------------------------------------------------------------
     def get_tick_value(self) -> Decimal:
@@ -182,6 +201,7 @@ class FuturesRoot(base.Base):
             multiplier=self.multiplier,
             tick_size=self.tick_size,
             settlement_type=self.settlement_type,
+            trading_calendar_id=self.trading_calendar_id,
             command_id=self.command_id,
         )
         return result

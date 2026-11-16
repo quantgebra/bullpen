@@ -122,7 +122,7 @@ Implemented in the `bullpen_sec_master` package (Postgres schema `sec_master`); 
   leg is the contract actually traded. The name → synthetic mapping is stable; a roll changes only the synthetic's leg,
   so the IBOR sees one continuous portfolio security across rolls. Both facts come from an external system and are
   stored as received (bi-temporal); there is no roll logic in bullpen. Limits: a synthetic has one name per symbology at
-  a time, and an unmapped name resolves to `None` just like an unknown one. See `test_guide_5_mandate_symbologies.py`.
+  a time, and an unmapped name resolves to `None` just like an unknown one. See `test_guide_05_mandate_symbologies.py`.
 
   **Synthetic instruments.** `InstrumentSynthetic` (`InstrumentType.SYNTHETIC`) is an instrument no broker can hold:
   VIX30, a calendar spread, a straddle, a mandate's research name. It has its own stable `instrument_id` and bi-temporal
@@ -131,7 +131,7 @@ Implemented in the `bullpen_sec_master` package (Postgres schema `sec_master`); 
   decomposition is one step. In the IBOR, entries are keyed `(fund, mandate, account, portfolio_security,
   traded_security)`: the synthetic is the portfolio security and its legs are the traded securities, which gives
   lineage back to research weights without a separate target-line concept; account-level (broker) positions are sums
-  over mandate and portfolio security. See `test_guide_6_synthetic_instruments.py`.
+  over mandate and portfolio security. See `test_guide_06_synthetic_instruments.py`.
 
   **Futures roots are not instruments (decided).** A root names a market, not something that can be held, so it is never
   a portfolio security. Exposure to a futures market is always held through a synthetic that explicitly labels the roll
@@ -146,7 +146,38 @@ Implemented in the `bullpen_sec_master` package (Postgres schema `sec_master`); 
   (non-temporal) rows such as exchanges and symbologies keep a single identity: they are fetched with `session.get`,
   not through relationships from bi-temporal rows, because a related row loaded through an as-of row inherits its
   token and would become a second copy. `Symbology.parent` is an ordinary relationship. See
-  `test_guide_7_reading_as_of.py`.
+  `test_guide_07_reading_as_of.py`.
+
+  **Trading calendars.** `TradingCalendar` (XNYS, CME_GLOBEX_ENERGY) is a plain row with a time zone, regular session
+  times and a weekmask (Monday first, Monday to Friday by default). Nothing is stored for an ordinary day; only
+  exceptions are, as `TradingCalendarException` rows, one per date: a holiday or a special session with its own open
+  and close. `regular_open_day_offset = -1` covers sessions that open the evening before (Globex). Exceptions have no
+  effective range (the fact is about its own date) but do have a knowledge range, because closures are announced late,
+  amended and cancelled; every question (`is_trading_day`, `get_session`, `get_next_trading_day`,
+  `get_previous_trading_day`) takes `known_at_datetime`, so an order run stays reproducible. Exchanges have a default
+  calendar and a futures root may override it (`root.get_trading_calendar(session)`). Calendars are loaded through
+  commands; a library such as `exchange_calendars` may seed them but is never consulted at runtime. Settlement
+  calendars and expiry rules are not modelled yet. See `test_guide_08_trading_calendars.py`.
+
+  **Quote conventions.** A canonical price is in major units of the instrument's currency (dollars, not cents), so
+  `notional = price * multiplier * quantity`; a canonical futures quantity is in contracts. Where a symbology writes
+  numbers differently (CBOT corn in cents, London equities in pence, a clearer reporting crude in barrels) a
+  bi-temporal `QuoteConventionForFuturesRoot` or `QuoteConventionForInstrument` row holds `price_factor` and
+  `quantity_factor` (`canonical = vendor * factor`). `quote_convention.get_quote_convention(session, symbology,
+  instrument, as_of)` walks the symbology chain, most specific first, and within one symbology prefers the
+  instrument's own row to its root's; with nothing stored the symbology is canonical. The returned `QuoteConvention`
+  converts both ways. Conversion happens at the boundary: nothing inside bullpen holds a vendor price. Text notations
+  such as Treasury 32nds are not handled yet. See `test_guide_09_quote_conventions.py`.
+
+  **Corporate actions.** A `CorporateAction` (stable key `corporate_action_id`) is an event on one instrument with an
+  `ex_date`, optional `record_date` and `pay_date`, `is_held_surrendered` (split, merger) or not (dividend, spin-off),
+  and one or more `CorporateActionOutcome` rows per unit held: cash (currency, amount) or securities (instrument,
+  quantity, `cost_basis_fraction`, which may arrive later). The `CorporateActionType` is a label; the IBOR applies
+  every type through the outcomes alone. Like calendar exceptions, actions have a knowledge range but no effective
+  range: `with_new_dates`, `with_new_outcomes` and `cancel` are new beliefs, and `find_going_ex(session, instrument,
+  from_ex_date, to_ex_date, known_at_datetime)` is the IBOR's question. Not modelled yet: elections (optional
+  dividends, tender offers), rights issues, fractional-share cash-in-lieu, withholding tax, and price-adjustment
+  factors for research history. See `test_guide_10_corporate_actions.py`.
 
 **Naming convention:** see `AGENTS.md` rules 37–41 (concept-first variant names, `For` for things attached to a
 target, names that carry their type, verb-first functions, tests as a user guide).
@@ -172,4 +203,6 @@ Money and price fields are `NUMERIC`/`Decimal`, never float. Enums are stored as
 - Tenancy: single manager vs multi-tenant from the start.
 - Whether `ibor.event` is partitioned (by `trade_date`) from day one.
 - Identity of the book `(fund, mandate, account)`: composite key vs a `book` table with surrogate id.
-- Calendar source and settlement-date rules (T+1 equities, T+0 futures) — owned by `bullpen-sec-master`.
+- Settlement calendars (per currency) and settlement-date rules (T+1 equities, T+0 futures) — owned by
+  `bullpen-sec-master`; trading calendars, quote conventions and corporate-action definitions are done.
+- How the IBOR applies a corporate action (lot treatment, cash-in-lieu) — owned by `bullpen-ibor`.
