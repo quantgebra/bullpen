@@ -1,9 +1,9 @@
 # bullpen-sec-master
 
-The bi-temporal securities master for bullpen: exchanges, instruments, futures roots, synthetic instruments, vendor
-and research symbologies, trading calendars, quote conventions and corporate-action definitions. It is a library over
-Postgres (schema `sec_master`) using SQLAlchemy 2.0; the IBOR and the server use it through a single SQLAlchemy session
-per command.
+Part of [BullPen](../README.md). The bi-temporal securities master: exchanges, instruments, futures roots, synthetic
+instruments, vendor and research symbologies, trading calendars, quote conventions and corporate-action definitions. It
+is a library over Postgres (schema `sec_master`) using SQLAlchemy 2.0; the IBOR and the server use it through a single
+SQLAlchemy session per command.
 
 The executable specification is the user guide under `tests/bullpen_sec_master/` (`test_guide_01_...` to
 `test_guide_10_...`): each file teaches one part of the system, in order. The wider architecture is in

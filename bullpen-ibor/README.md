@@ -1,9 +1,9 @@
 # bullpen-ibor
 
-The Gen 3 IBOR: positions are projections over an append-only ledger of events in Postgres (schema `ibor`). Nothing
-but events (and the source documents that cause them) is stored. The design is in
-[`../docs/architecture.md`](../docs/architecture.md) §4; the executable specification is the user guide under
-`tests/bullpen_ibor/`.
+Part of [BullPen](../README.md). The Gen 3 IBOR (investment book of record): positions are projections over an
+append-only ledger of events in Postgres (schema `ibor`). Nothing but events (and the source documents that cause
+them) is stored. The design is in [`../docs/architecture.md`](../docs/architecture.md) §4; the executable
+specification is the user guide under `tests/bullpen_ibor/`.
 
 ## Running
 

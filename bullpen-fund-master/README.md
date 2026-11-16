@@ -1,9 +1,9 @@
 # bullpen-fund-master
 
-Who owns what and who decides what: funds, mandates, sleeves, brokers and accounts, bi-temporal, in Postgres schema
-`fund_master`. Other packages (the IBOR, later the OMS and NAV) refer to these by stable id only. The design is in
-[`../docs/architecture.md`](../docs/architecture.md) §4a; the executable specification is the user guide under
-`tests/bullpen_fund_master/`.
+Part of [BullPen](../README.md). Who owns what and who decides what: funds, mandates, sleeves, brokers and accounts,
+bi-temporal, in Postgres schema `fund_master`. Other packages (the IBOR, later the OMS and NAV) refer to these by stable
+id only. The design is in [`../docs/architecture.md`](../docs/architecture.md) §4a; the executable specification is the
+user guide under `tests/bullpen_fund_master/`.
 
 ## Running
 
