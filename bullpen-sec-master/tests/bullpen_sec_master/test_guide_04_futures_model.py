@@ -14,7 +14,7 @@ import sqlalchemy
 from sqlalchemy import exc
 from sqlalchemy.dialects import postgresql
 
-import bullpen_sec_master.as_of as as_of_module
+import bullpen_temporal.as_of as as_of_module
 import bullpen_sec_master.futures_root as futures_root
 import bullpen_sec_master.instrument as instrument
 import bullpen_sec_master.instrument_equity as instrument_equity

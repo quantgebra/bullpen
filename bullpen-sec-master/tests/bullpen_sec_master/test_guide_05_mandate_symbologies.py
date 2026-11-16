@@ -19,7 +19,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import exc
 
-import bullpen_sec_master.as_of as as_of_module
+import bullpen_temporal.as_of as as_of_module
 import bullpen_sec_master.instrument_futures_contract as instrument_futures_contract
 import bullpen_sec_master.instrument_synthetic as instrument_synthetic
 import bullpen_sec_master.symbology as symbology

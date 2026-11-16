@@ -6,7 +6,8 @@ import sqlalchemy
 from sqlalchemy import orm
 from sqlalchemy.dialects import postgresql
 
-import bullpen_sec_master.as_of as as_of_module
+import bullpen_temporal.as_of as as_of_module
+import bullpen_temporal.bitemporal_row as bitemporal_row
 import bullpen_sec_master.base as base
 import bullpen_sec_master.instrument as instrument
 import bullpen_sec_master.instrument_type as instrument_types
@@ -27,7 +28,7 @@ class LegWeight(NamedTuple):
 
 
 # ======================================================================================================================
-class InstrumentSyntheticLeg(base.Base):
+class InstrumentSyntheticLeg(bitemporal_row.BitemporalRow, base.Base):
     """
     One leg of a synthetic: from effective_range, as believed during knowledge_range, the synthetic holds weight of the
     leg instrument. Both ids are stable keys resolved as-of, so there are no FKs. Only manipulated through its synthetic.
@@ -48,70 +49,20 @@ class InstrumentSyntheticLeg(base.Base):
         ),
     )
 
-    # ------------------------------------------------------------------------------------------------------------------
-    @staticmethod
-    def _close_believed_rows(
-        session: orm.Session,
-        synthetic_instrument_id: int,
-        effective_from_date: date,
-        effective_to_date: Optional[date],
-        known_at_datetime: datetime,
-    ) -> None:
-        """
-        Supersede every believed leg inside [effective_from_date, effective_to_date): close each overlapping row's
-        knowledge_range and re-insert the parts of it that lie outside that window, so facts outside it are kept.
-        """
-        window_date_range: postgresql.Range[date] = postgresql.Range(
-            effective_from_date, effective_to_date, bounds="[)"
-        )
-        select_statement: sqlalchemy.Select = (
-            sqlalchemy.select(InstrumentSyntheticLeg)
-            .where(
-                InstrumentSyntheticLeg.synthetic_instrument_id == synthetic_instrument_id,
-                sqlalchemy.func.upper_inf(InstrumentSyntheticLeg.knowledge_range),
-                InstrumentSyntheticLeg.effective_range.overlaps(window_date_range),
-            )
-            .order_by(sqlalchemy.func.lower(InstrumentSyntheticLeg.effective_range))
-        )
-        closed_rows: list[InstrumentSyntheticLeg] = list(session.scalars(select_statement).all())
-        for closed_row in closed_rows:
-            # stop believing the whole row first, so the kept parts below cannot overlap it
-            old_effective_range: postgresql.Range[date] = closed_row.effective_range
-            closed_row.knowledge_range = postgresql.Range(
-                closed_row.knowledge_range.lower, known_at_datetime, bounds="[)"
-            )
-            session.flush()
-
-            # keep the part before the window
-            if old_effective_range.lower < effective_from_date:
-                session.add(
-                    closed_row._copy_with_ranges(
-                        postgresql.Range(old_effective_range.lower, effective_from_date, bounds="[)"),
-                        postgresql.Range(known_at_datetime, None, bounds="[)"),
-                    )
-                )
-
-            # keep the part after the window (only a bounded window has an after)
-            if effective_to_date is not None:
-                if old_effective_range.upper is None or old_effective_range.upper > effective_to_date:
-                    session.add(
-                        closed_row._copy_with_ranges(
-                            postgresql.Range(effective_to_date, old_effective_range.upper, bounds="[)"),
-                            postgresql.Range(known_at_datetime, None, bounds="[)"),
-                        )
-                    )
-        session.flush()
-
     # ==================================================================================================================
     # INSTANCE
     # ==================================================================================================================
-    row_id: orm.Mapped[int] = orm.mapped_column(primary_key=True)
     synthetic_instrument_id: orm.Mapped[int] = orm.mapped_column(index=True)
     leg_instrument_id: orm.Mapped[int] = orm.mapped_column(index=True)
-    effective_range: orm.Mapped[postgresql.Range[date]] = orm.mapped_column(postgresql.DATERANGE)
-    knowledge_range: orm.Mapped[postgresql.Range[datetime]] = orm.mapped_column(postgresql.TSTZRANGE)
     weight: orm.Mapped[Decimal] = orm.mapped_column(sqlalchemy.Numeric(28, 12))
-    command_id: orm.Mapped[Optional[int]]
+
+    # ------------------------------------------------------------------------------------------------------------------
+    def _get_same_entity_conditions(self) -> list[sqlalchemy.ColumnElement]:
+        """The legs of one synthetic change together, so the entity is the whole leg set."""
+        result: list[sqlalchemy.ColumnElement] = [
+            InstrumentSyntheticLeg.synthetic_instrument_id == self.synthetic_instrument_id
+        ]
+        return result
 
     # ------------------------------------------------------------------------------------------------------------------
     def _copy_with_ranges(
@@ -199,7 +150,11 @@ class InstrumentSynthetic(instrument.Instrument):
                 raise ValueError(f"empty window {effective_from_date} .. {effective_to_date}")
 
         InstrumentSyntheticLeg._close_believed_rows(
-            session, self.instrument_id, effective_from_date, effective_to_date, known_at_datetime
+            session,
+            [InstrumentSyntheticLeg.synthetic_instrument_id == self.instrument_id],
+            effective_from_date,
+            effective_to_date,
+            known_at_datetime,
         )
         self._insert_legs(session, effective_from_date, effective_to_date, known_at_datetime, legs)
 
@@ -207,17 +162,11 @@ class InstrumentSynthetic(instrument.Instrument):
     def get_legs(self, session: orm.Session) -> list[LegWeight]:
         """The legs held as of the AsOf this synthetic was read at, each leg instrument read at that same AsOf."""
         row_as_of: as_of_module.AsOf = as_of_module.get_as_of_from_row(self)
-        select_statement: sqlalchemy.Select = (
-            sqlalchemy.select(InstrumentSyntheticLeg)
-            .where(
-                InstrumentSyntheticLeg.synthetic_instrument_id == self.instrument_id,
-                InstrumentSyntheticLeg.effective_range.contains(row_as_of.effective_date),
-                InstrumentSyntheticLeg.knowledge_range.contains(row_as_of.known_at_datetime),
-            )
-            .order_by(InstrumentSyntheticLeg.leg_instrument_id)
-        )
-        leg_rows: list[InstrumentSyntheticLeg] = list(
-            session.scalars(select_statement, execution_options={"identity_token": row_as_of}).all()
+        leg_rows: list[InstrumentSyntheticLeg] = InstrumentSyntheticLeg.find_all_as_of(
+            session,
+            [InstrumentSyntheticLeg.synthetic_instrument_id == self.instrument_id],
+            row_as_of,
+            InstrumentSyntheticLeg.leg_instrument_id,
         )
 
         result: list[LegWeight] = []

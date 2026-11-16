@@ -18,7 +18,7 @@ from decimal import Decimal
 
 import pytest
 
-import bullpen_sec_master.as_of as as_of_module
+import bullpen_temporal.as_of as as_of_module
 import bullpen_sec_master.futures_root as futures_root
 import bullpen_sec_master.instrument_equity as instrument_equity
 import bullpen_sec_master.instrument_futures_contract as instrument_futures_contract

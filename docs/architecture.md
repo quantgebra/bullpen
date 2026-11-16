@@ -1,6 +1,7 @@
 # Bullpen — Architecture
 
-Status: **draft / planning**. Nothing here is implemented yet. Bullpen is a clean-room successor to trinity-fms
+Status: **in progress**. The securities master, the fund master and IBOR slice 1 are implemented; the rest is
+planned. Bullpen is a clean-room successor to trinity-fms
 (securities master, Gen 3 IBOR, NAV, OMS, reconciliation). Code style follows `AGENTS.md`.
 
 ---
@@ -21,16 +22,21 @@ One git repository, independent Poetry packages (no workspace tooling; sibling d
 | Package | Import name | Responsibility | Depends on |
 |---|---|---|---|
 | `bullpen-common` | `bullpen_common` | Wire DTOs, enums, ID/money types, command envelope. No sibling deps. | — |
-| `bullpen-sec-master` | `bullpen_sec_master` | Instruments, listings, identifiers, calendars, currencies, corporate-action definitions. | common |
-| `bullpen-ibor` | `bullpen_ibor` | Event ledger, position extractor, lots, cash ladder, P&L. | common (sec-master by ID only) |
+| `bullpen-temporal` | `bullpen_temporal` | Shared bi-temporal persistence: `AsOf`, the `BitemporalRow` mixin. Kept out of common so the client does not depend on SQLAlchemy. | — |
+| `bullpen-sec-master` | `bullpen_sec_master` | Instruments, listings, identifiers, calendars, currencies, corporate-action definitions. | common, temporal |
+| `bullpen-fund-master` | `bullpen_fund_master` | Funds, mandates, sleeves, accounts, brokers (later: share classes, series). | common, temporal |
+| `bullpen-ibor` | `bullpen_ibor` | Event ledger, position extractor, lots, cash ladder, P&L. | common (sec-master and fund-master by ID only) |
 | `bullpen-server` | `bullpen_server` | REST API (queries + command submission), command-queue worker. | common, sec-master, ibor |
 | `bullpen-client` | `bullpen_client` | Typed httpx client. | common |
 
-Planned later: `bullpen-oms`, `bullpen-nav`, `bullpen-recon`, `bullpen-ui`.
+Planned later: `bullpen-market-data` (prices, exchange rates), `bullpen-oms` (including order-flow routes), `bullpen-nav`,
+`bullpen-recon`, `bullpen-ui`.
 
 Rules:
 - Packages never import each other's ORM tables. Cross-package references are by ID and by `bullpen-common` DTOs.
-- Each package owns a Postgres **schema** (`sec_master`, `ibor`, `cmd`, ...) and its own Alembic branch.
+- No foreign keys across package schemas. Command handlers, which may read several packages, check that the ids they
+  write fit together (e.g. a book's sleeve exists and its account belongs to its fund).
+- Each package owns a Postgres **schema** (`sec_master`, `fund_master`, `ibor`, `cmd`, ...) and its own Alembic branch.
 - The server is the only place that composes packages.
 
 ## 3. Write path: REST + Postgres command queue
@@ -60,25 +66,60 @@ client ──POST /commands──► bullpen-server ──INSERT──► cmd.co
 - Synchronous commands: `POST /commands?wait=true` runs the same handler in-process for the same audit trail.
 - Reads are plain `GET`s that never go through the queue (CQRS).
 
-## 4. Gen 3 IBOR sketch
+## 4. Gen 3 IBOR
 
-Single append-only table `ibor.event`, never updated or deleted:
+Implemented in the `bullpen_ibor` package (Postgres schema `ibor`); the guide tests in `bullpen-ibor/tests` are the
+executable spec. Slice 1 (booking trades, positions, roll-ups) is done.
 
-| Column | Meaning |
-|---|---|
-| `id` | surrogate, monotonic |
-| `book_key` | (portfolio, sleeve, account) address, normalised |
-| `instrument_id` / `traded_instrument_id` | what is held / what was traded |
-| `delta_quantity` | signed `NUMERIC` |
-| `trade_date`, `settlement_date` | economic dates (traded vs settled views) |
-| `knowledge_time` | when the system learned it; never overwritten |
-| `event_type`, `source_ref`, `command_id` | provenance |
+- **Books.** A book is the `(fund_id, mandate_id, account_id)` triple of fund-master ids, stored as it is on every
+  trade and event: there is no `books` table and no book id. `(fund_id, mandate_id)` is a sleeve. The IBOR has no
+  foreign keys to the fund master; the command handler checks that the book fits before booking.
+- **One append-only table, `ibor.events`,** never updated or deleted. Each event is a signed `delta_quantity` of
+  `traded_instrument_id`, held in the book for `portfolio_instrument_id` (usually a synthetic), with `trade_date`,
+  `settlement_date`, `known_at_datetime`, `event_type`, `command_id`, and `reverses_event_id` (unique: an event is
+  reversed at most once). Instrument ids are securities-master stable keys, referenced by id only.
+- **Knowledge is an instant, not a range.** A sec-master correction replaces a belief; a ledger correction is a
+  compensating event that offsets the mistake. Positions stay `SUM(delta_quantity)` over events with
+  `known_at_datetime <= K`, and every restatement is visible as events.
+- **Sources.** Every event names the version of the business document that caused it: `source_type` (Postgres enum:
+  `TRADE`, `CORPORATE_ACTION`, `CASH_TRANSFER`, `ADJUSTMENT`) and `source_row_id`, the row id of that version.
+  `command_id` says which command wrote it; the source says why. Pointing at the version gives exact lineage and makes
+  "events whose source has since been amended" a query. There is no FK (sources live in several tables and schemas);
+  the command handler is the only writer.
+- **Trades** (`ibor.trades`) are recorded as received from the OMS or broker and versioned like corporate actions:
+  stable `trade_id`, one row per version with a `knowledge_range`. `Trade.book_trade(...)` records the trade and
+  appends its events. `cash_amount` is the broker's signed settlement amount, so booking cash needs no multiplier or
+  quote convention; a futures trade has zero cash and books only the quantity event.
+- **Cash is an instrument quantity** (`InstrumentType.CASH`), held with itself as the portfolio security, so a buy is
+  +shares and -dollars in one sum.
+- **Views** are filters on the same sum: *traded* (`trade_date <= E`) and *settled* (`settlement_date <= E`), both at
+  `known_at_datetime <= K`. Later: *working* (traded + live OMS orders) and *forecast* (working + unreleased requests).
+  `position.get_book_positions`, `get_sleeve_positions` (over accounts), `get_account_positions` and
+  `get_fund_positions` (by traded security only: what a broker reports).
+- **The IBOR does not import the securities master.** Anything needing reference data (expanding a synthetic's legs,
+  applying a corporate action, settlement dates) is a command handler that reads the sec-master and appends events.
+- Snapshots are optional caches and may be discarded or rebuilt at any time. Day close is a knowledge-time marker, not
+  a gate: late trades land normally and surface as restatements.
 
-- Cancels/busts are **compensating events** with a fresh `knowledge_time`.
-- Views: *settled* (`settlement_date <= E`), *traded* (`trade_date <= E`), *working* (traded + live OMS orders),
-  *forecast* (working + unreleased requests). All are `SUM(delta_quantity)` projections at `(E, K)`.
-- Snapshots are optional caches keyed by `(as_of, knowledge_time)` and may be discarded or rebuilt at any time.
-- Day close becomes a **knowledge-time marker**, not a gate: late trades land normally and surface as restatements.
+Next slices: corrections (amend and cancel trades via reversals), synthetic lineage against research weights, cash
+(fees, transfers, cash ladder), corporate-action application, lots and realized P&L.
+
+## 4a. Fund master
+
+Implemented in the `bullpen_fund_master` package (Postgres schema `fund_master`); see
+`bullpen-fund-master/tests/bullpen_fund_master/test_guide_01_fund_structure.py`.
+
+- **Fund** (a legal entity that owns positions), **Mandate** (a strategy run against research weights; not owned by a
+  fund), **Sleeve** (a fund running a mandate: the pair `(fund_id, mandate_id)`; one mandate may run in several funds),
+  **Broker**, and **Account** (a fund's account at a broker; `code` is the broker's account number, unique within the
+  broker). Any sleeve of a fund may trade through any of the fund's accounts.
+- **Everything is bi-temporal**, because the fund structure and accounts change and are learned late. Each class uses
+  the `bullpen_temporal.bitemporal_row.BitemporalRow` mixin (row id, both ranges, `command_id`, `end`, and the
+  supersede/replace machinery); a class adds its stable key, an EXCLUDE constraint, `_get_same_entity_conditions` and
+  `_copy_with_ranges`. Reads take an `AsOf`; traversals (`sleeve.get_fund`, `account.get_broker`) reuse the row's.
+- **A book fits** when `Sleeve.find_as_of(session, fund_id, mandate_id, as_of)` exists and
+  `sleeve.can_trade_through(account)`. Command handlers check this before the IBOR books anything.
+- Later: share classes and series. Order-flow routes belong to the OMS.
 
 ## 5. Securities master: bi-temporal model
 
@@ -95,12 +136,16 @@ Implemented in the `bullpen_sec_master` package (Postgres schema `sec_master`); 
   unique). References are by key and resolved with an as-of lookup (`find_as_of(session, key, as_of)`).
   Integrity that an identity table would give is enforced by constraints instead, e.g. type immutability is
   `EXCLUDE USING gist (instrument_id WITH =, instrument_type WITH <>)`.
-- **Creating and changing.** Each bi-temporal class declares its own two range columns. `create` always allocates a new
-  stable key. A change is an instance method named `with_new_<field with unit>` (`with_new_name`, `with_new_currency_code`,
-  `with_new_expiry_date`, `with_new_tick_size`): it supersedes the row it is called on and returns the replacement, so
-  the caller does not repeat unchanged values. It must be called on the latest believed row, otherwise it raises, because
-  later facts would be lost silently. Symbol rows have `with_new_symbol_text` (it only needs the symbol row to be
-  believed, so it may be dated before the row's start, to correct a change date) and `end`. No `**kwargs` or change dicts.
+- **Creating and changing.** Every bi-temporal class uses the `bullpen_temporal.bitemporal_row.BitemporalRow` mixin
+  (row id, both ranges, `command_id`, `find_one_as_of` / `find_all_as_of`, `end`, and the supersede machinery); a class
+  adds its stable key, an EXCLUDE constraint, `_get_same_entity_conditions` and `_copy_with_ranges`. `create` always
+  allocates a new stable key. A change is an instance method named `with_new_<field with unit>` (`with_new_name`,
+  `with_new_currency_code`, `with_new_expiry_date`, `with_new_tick_size`): it supersedes the row it is called on and
+  returns the replacement, so the caller does not repeat unchanged values. It must be called on the latest believed row,
+  otherwise it raises, because later facts would be lost silently. Rows holding a single fact (symbols, quote
+  conventions) set `MAY_SUPERSEDE_EARLIER_ROWS`, so `with_new_symbol_text` may be dated before the row's start to
+  correct a change date: the replacement restates everything the earlier rows said. Synthetic legs supersede a bounded
+  window of the whole leg set. No `**kwargs` or change dicts.
 - **Type-specific facts** live in joined subclass tables keyed by `row_id` (`instrument_futures_contracts` for `InstrumentFuturesContract`),
   so they share the row's two ranges. `with_new_*` clones every mapped column including subclass tables.
 - **Futures roots** (CL, ES) are their own bi-temporal concept holding tick size, multiplier, settlement type, exchange.
@@ -140,7 +185,7 @@ Implemented in the `bullpen_sec_master` package (Postgres schema `sec_master`); 
 
   **Reading as of (D, K).** Reads take one `AsOf(effective_date, known_at_datetime)`. As-of queries load rows with the
   `AsOf` as SQLAlchemy's `identity_token`, so one row read at two `AsOf`s is two objects in one session, and each row
-  knows its own `AsOf` (`as_of.get_as_of_from_row(row)`). Traversals from a row (`contract.get_root(session)`,
+  knows its own `AsOf` (`bullpen_temporal.as_of.get_as_of_from_row(row)`). Traversals from a row (`contract.get_root(session)`,
   `synthetic.get_legs(session)`, `symbol_row.get_target(session)`) reuse that `AsOf`. Rows just written have no `AsOf`
   and must be re-read before traversing. Writes keep an explicit `effective_from_date` and `known_at_datetime`. Plain
   (non-temporal) rows such as exchanges and symbologies keep a single identity: they are fetched with `session.get`,
@@ -202,7 +247,6 @@ Money and price fields are `NUMERIC`/`Decimal`, never float. Enums are stored as
 
 - Tenancy: single manager vs multi-tenant from the start.
 - Whether `ibor.event` is partitioned (by `trade_date`) from day one.
-- Identity of the book `(fund, mandate, account)`: composite key vs a `book` table with surrogate id.
 - Settlement calendars (per currency) and settlement-date rules (T+1 equities, T+0 futures) — owned by
   `bullpen-sec-master`; trading calendars, quote conventions and corporate-action definitions are done.
 - How the IBOR applies a corporate action (lot treatment, cash-in-lieu) — owned by `bullpen-ibor`.

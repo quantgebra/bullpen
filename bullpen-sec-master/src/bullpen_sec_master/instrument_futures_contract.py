@@ -6,7 +6,7 @@ import sqlalchemy
 from sqlalchemy import orm
 from sqlalchemy.dialects import postgresql
 
-import bullpen_sec_master.as_of as as_of_module
+import bullpen_temporal.as_of as as_of_module
 import bullpen_sec_master.futures_root as futures_root_module
 import bullpen_sec_master.instrument as instrument
 import bullpen_sec_master.instrument_type as instrument_types
@@ -69,12 +69,9 @@ class InstrumentFuturesContract(instrument.Instrument):
         self, session: orm.Session, effective_from_date: date, known_at_datetime: datetime, expiry_date: date
     ) -> "InstrumentFuturesContract":
         """From effective_from_date onward the contract expires on expiry_date; self becomes a superseded belief."""
-        self._supersede_from(session, effective_from_date, known_at_datetime)
-        replacement_row: InstrumentFuturesContract = self._copy_with_ranges(
-            postgresql.Range(effective_from_date, None, bounds="[)"),
-            postgresql.Range(known_at_datetime, None, bounds="[)"),
+        replacement_row: InstrumentFuturesContract = self._create_replacement(
+            session, effective_from_date, known_at_datetime
         )
-        replacement_row.command_id = None
         replacement_row.expiry_date = expiry_date
         session.add(replacement_row)
         session.flush()

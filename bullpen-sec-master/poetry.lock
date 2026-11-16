@@ -95,6 +95,23 @@ type = "directory"
 url = "../bullpen-common"
 
 [[package]]
+name = "bullpen-temporal"
+version = "0.1.0"
+description = "Shared bi-temporal persistence: AsOf and the bi-temporal row mixin"
+optional = false
+python-versions = ">=3.11,<3.15"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+sqlalchemy = "^2.0.45"
+
+[package.source]
+type = "directory"
+url = "../bullpen-temporal"
+
+[[package]]
 name = "certifi"
 version = "2026.10.23"
 description = "Python package for providing Mozilla's CA Bundle."
@@ -1414,4 +1431,4 @@ dev = ["pytest", "setuptools"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.15"
-content-hash = "0d60c73bbc61811fb354ba62faee3b3a4d131371078eb573e50d87d1ba02f42e"
+content-hash = "784f4ebd4805b949925db96ad58e99f6a0ee32522b2e91e659398761330bad33"

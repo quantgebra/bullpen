@@ -5,7 +5,7 @@ import sqlalchemy
 from sqlalchemy import orm
 from sqlalchemy.dialects import postgresql
 
-import bullpen_sec_master.as_of as as_of_module
+import bullpen_temporal.as_of as as_of_module
 import bullpen_sec_master.futures_root as futures_root_module
 import bullpen_sec_master.symbol_for_futures_root as symbol_for_futures_root
 import bullpen_sec_master.symbology as symbology_module
@@ -95,15 +95,16 @@ def find_symbol_row_by_target(
     as_of: as_of_module.AsOf,
 ) -> Optional[symbol_for_futures_root.SymbolForFuturesRoot]:
     """The symbol row for this futures_root in exactly this symbology (no inheritance, no canonical fallback)."""
-    select_statement: sqlalchemy.Select = sqlalchemy.select(symbol_for_futures_root.SymbolForFuturesRoot).where(
-        symbol_for_futures_root.SymbolForFuturesRoot.symbology_id == owning_symbology.id,
-        symbol_for_futures_root.SymbolForFuturesRoot.futures_root_id == futures_root.futures_root_id,
-        symbol_for_futures_root.SymbolForFuturesRoot.effective_range.contains(as_of.effective_date),
-        symbol_for_futures_root.SymbolForFuturesRoot.knowledge_range.contains(as_of.known_at_datetime),
+    result: Optional[symbol_for_futures_root.SymbolForFuturesRoot] = (
+        symbol_for_futures_root.SymbolForFuturesRoot.find_one_as_of(
+            session,
+            [
+                symbol_for_futures_root.SymbolForFuturesRoot.symbology_id == owning_symbology.id,
+                symbol_for_futures_root.SymbolForFuturesRoot.futures_root_id == futures_root.futures_root_id,
+            ],
+            as_of,
+        )
     )
-    result: Optional[symbol_for_futures_root.SymbolForFuturesRoot] = session.scalars(
-        select_statement, execution_options={"identity_token": as_of}
-    ).first()
     return result
 
 
@@ -137,13 +138,14 @@ def _find_symbol_row_by_symbol_text(
     as_of: as_of_module.AsOf,
 ) -> Optional[symbol_for_futures_root.SymbolForFuturesRoot]:
     """The symbol row giving this symbol in exactly this symbology (no inheritance, no canonical fallback)."""
-    select_statement: sqlalchemy.Select = sqlalchemy.select(symbol_for_futures_root.SymbolForFuturesRoot).where(
-        symbol_for_futures_root.SymbolForFuturesRoot.symbology_id == owning_symbology.id,
-        symbol_for_futures_root.SymbolForFuturesRoot.symbol_text == symbol_text,
-        symbol_for_futures_root.SymbolForFuturesRoot.effective_range.contains(as_of.effective_date),
-        symbol_for_futures_root.SymbolForFuturesRoot.knowledge_range.contains(as_of.known_at_datetime),
+    result: Optional[symbol_for_futures_root.SymbolForFuturesRoot] = (
+        symbol_for_futures_root.SymbolForFuturesRoot.find_one_as_of(
+            session,
+            [
+                symbol_for_futures_root.SymbolForFuturesRoot.symbology_id == owning_symbology.id,
+                symbol_for_futures_root.SymbolForFuturesRoot.symbol_text == symbol_text,
+            ],
+            as_of,
+        )
     )
-    result: Optional[symbol_for_futures_root.SymbolForFuturesRoot] = session.scalars(
-        select_statement, execution_options={"identity_token": as_of}
-    ).first()
     return result

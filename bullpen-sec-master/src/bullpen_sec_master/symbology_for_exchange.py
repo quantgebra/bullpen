@@ -5,7 +5,7 @@ import sqlalchemy
 from sqlalchemy import orm
 from sqlalchemy.dialects import postgresql
 
-import bullpen_sec_master.as_of as as_of_module
+import bullpen_temporal.as_of as as_of_module
 import bullpen_sec_master.exchange as exchange_module
 import bullpen_sec_master.symbol_for_exchange as symbol_for_exchange
 import bullpen_sec_master.symbology as symbology_module
@@ -90,15 +90,14 @@ def find_symbol_row_by_target(
     as_of: as_of_module.AsOf,
 ) -> Optional[symbol_for_exchange.SymbolForExchange]:
     """The symbol row for this exchange in exactly this symbology (no inheritance, no canonical fallback)."""
-    select_statement: sqlalchemy.Select = sqlalchemy.select(symbol_for_exchange.SymbolForExchange).where(
-        symbol_for_exchange.SymbolForExchange.symbology_id == owning_symbology.id,
-        symbol_for_exchange.SymbolForExchange.exchange_id == exchange.id,
-        symbol_for_exchange.SymbolForExchange.effective_range.contains(as_of.effective_date),
-        symbol_for_exchange.SymbolForExchange.knowledge_range.contains(as_of.known_at_datetime),
+    result: Optional[symbol_for_exchange.SymbolForExchange] = symbol_for_exchange.SymbolForExchange.find_one_as_of(
+        session,
+        [
+            symbol_for_exchange.SymbolForExchange.symbology_id == owning_symbology.id,
+            symbol_for_exchange.SymbolForExchange.exchange_id == exchange.id,
+        ],
+        as_of,
     )
-    result: Optional[symbol_for_exchange.SymbolForExchange] = session.scalars(
-        select_statement, execution_options={"identity_token": as_of}
-    ).first()
     return result
 
 
@@ -133,13 +132,12 @@ def _find_symbol_row_by_symbol_text(
     as_of: as_of_module.AsOf,
 ) -> Optional[symbol_for_exchange.SymbolForExchange]:
     """The symbol row giving this symbol in exactly this symbology (no inheritance, no canonical fallback)."""
-    select_statement: sqlalchemy.Select = sqlalchemy.select(symbol_for_exchange.SymbolForExchange).where(
-        symbol_for_exchange.SymbolForExchange.symbology_id == owning_symbology.id,
-        symbol_for_exchange.SymbolForExchange.symbol_text == symbol_text,
-        symbol_for_exchange.SymbolForExchange.effective_range.contains(as_of.effective_date),
-        symbol_for_exchange.SymbolForExchange.knowledge_range.contains(as_of.known_at_datetime),
+    result: Optional[symbol_for_exchange.SymbolForExchange] = symbol_for_exchange.SymbolForExchange.find_one_as_of(
+        session,
+        [
+            symbol_for_exchange.SymbolForExchange.symbology_id == owning_symbology.id,
+            symbol_for_exchange.SymbolForExchange.symbol_text == symbol_text,
+        ],
+        as_of,
     )
-    result: Optional[symbol_for_exchange.SymbolForExchange] = session.scalars(
-        select_statement, execution_options={"identity_token": as_of}
-    ).first()
     return result

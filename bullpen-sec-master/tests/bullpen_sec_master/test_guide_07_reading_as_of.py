@@ -17,7 +17,7 @@ from decimal import Decimal
 
 import pytest
 
-import bullpen_sec_master.as_of as as_of_module
+import bullpen_temporal.as_of as as_of_module
 import bullpen_sec_master.instrument as instrument
 
 from .conftest import FIRST_KNOWN_DATETIME, SECOND_KNOWN_DATETIME, THIRD_KNOWN_DATETIME

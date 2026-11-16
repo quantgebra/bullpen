@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "bullpen-temporal"
+version = "0.1.0"
+description = "Shared bi-temporal persistence: AsOf and the bi-temporal row mixin"
+authors = ["Maciej Zawadzki <maciej.zawadzki@gmail.com>"]
+readme = "README.md"
+packages = [{ include = "bullpen_temporal", from = "src" }]
+
+[tool.black]
+line-length = 120
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.15"
+sqlalchemy = "^2.0.45"
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.3.0"
+

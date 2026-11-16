@@ -3,7 +3,7 @@ from typing import NamedTuple, Optional
 
 from sqlalchemy import orm
 
-import bullpen_sec_master.as_of as as_of_module
+import bullpen_temporal.as_of as as_of_module
 import bullpen_sec_master.instrument as instrument_module
 import bullpen_sec_master.instrument_futures_contract as instrument_futures_contract
 import bullpen_sec_master.quote_convention_for_futures_root as quote_convention_for_futures_root

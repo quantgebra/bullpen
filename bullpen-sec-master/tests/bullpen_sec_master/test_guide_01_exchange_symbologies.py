@@ -19,7 +19,7 @@ from datetime import date, datetime, timezone
 import pytest
 from sqlalchemy import exc, orm
 
-import bullpen_sec_master.as_of as as_of_module
+import bullpen_temporal.as_of as as_of_module
 import bullpen_sec_master.exchange as exchange
 import bullpen_sec_master.symbol_for_exchange as symbol_for_exchange
 import bullpen_sec_master.symbology as symbology

@@ -12,7 +12,7 @@ The vendor symbols and templates below are illustrative, not authoritative.
 import functools
 from datetime import date
 
-import bullpen_sec_master.as_of as as_of_module
+import bullpen_temporal.as_of as as_of_module
 import bullpen_sec_master.symbology_for_exchange as symbology_for_exchange
 import bullpen_sec_master.symbology_for_futures_root as symbology_for_futures_root
 import bullpen_sec_master.symbology_for_instrument as symbology_for_instrument

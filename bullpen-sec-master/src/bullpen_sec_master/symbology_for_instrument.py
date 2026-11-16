@@ -5,7 +5,7 @@ import sqlalchemy
 from sqlalchemy import orm
 from sqlalchemy.dialects import postgresql
 
-import bullpen_sec_master.as_of as as_of_module
+import bullpen_temporal.as_of as as_of_module
 import bullpen_sec_master.futures_root as futures_root
 import bullpen_sec_master.instrument as instrument_module
 import bullpen_sec_master.instrument_futures_contract as instrument_futures_contract
@@ -107,15 +107,16 @@ def find_symbol_row_by_target(
     as_of: as_of_module.AsOf,
 ) -> Optional[symbol_for_instrument.SymbolForInstrument]:
     """The symbol row for this instrument in exactly this symbology (no inheritance, no canonical fallback)."""
-    select_statement: sqlalchemy.Select = sqlalchemy.select(symbol_for_instrument.SymbolForInstrument).where(
-        symbol_for_instrument.SymbolForInstrument.symbology_id == owning_symbology.id,
-        symbol_for_instrument.SymbolForInstrument.instrument_id == instrument.instrument_id,
-        symbol_for_instrument.SymbolForInstrument.effective_range.contains(as_of.effective_date),
-        symbol_for_instrument.SymbolForInstrument.knowledge_range.contains(as_of.known_at_datetime),
+    result: Optional[symbol_for_instrument.SymbolForInstrument] = (
+        symbol_for_instrument.SymbolForInstrument.find_one_as_of(
+            session,
+            [
+                symbol_for_instrument.SymbolForInstrument.symbology_id == owning_symbology.id,
+                symbol_for_instrument.SymbolForInstrument.instrument_id == instrument.instrument_id,
+            ],
+            as_of,
+        )
     )
-    result: Optional[symbol_for_instrument.SymbolForInstrument] = session.scalars(
-        select_statement, execution_options={"identity_token": as_of}
-    ).first()
     return result
 
 
@@ -160,13 +161,14 @@ def _find_symbol_row_by_symbol_text(
     as_of: as_of_module.AsOf,
 ) -> Optional[symbol_for_instrument.SymbolForInstrument]:
     """The symbol row giving this symbol in exactly this symbology (no inheritance, no canonical fallback)."""
-    select_statement: sqlalchemy.Select = sqlalchemy.select(symbol_for_instrument.SymbolForInstrument).where(
-        symbol_for_instrument.SymbolForInstrument.symbology_id == owning_symbology.id,
-        symbol_for_instrument.SymbolForInstrument.symbol_text == symbol_text,
-        symbol_for_instrument.SymbolForInstrument.effective_range.contains(as_of.effective_date),
-        symbol_for_instrument.SymbolForInstrument.knowledge_range.contains(as_of.known_at_datetime),
+    result: Optional[symbol_for_instrument.SymbolForInstrument] = (
+        symbol_for_instrument.SymbolForInstrument.find_one_as_of(
+            session,
+            [
+                symbol_for_instrument.SymbolForInstrument.symbology_id == owning_symbology.id,
+                symbol_for_instrument.SymbolForInstrument.symbol_text == symbol_text,
+            ],
+            as_of,
+        )
     )
-    result: Optional[symbol_for_instrument.SymbolForInstrument] = session.scalars(
-        select_statement, execution_options={"identity_token": as_of}
-    ).first()
     return result
